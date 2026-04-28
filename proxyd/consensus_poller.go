@@ -405,7 +405,6 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 	var latestBlockHash string
 	var currentL1Number uint64
 	var syncStatusRaw json.RawMessage
-	var els ELBlockState
 	if cp.consensusLayer {
 		syncStatus, rawBody, clInSync, err := cp.updateCLBackend(ctx, be)
 		if err != nil {
@@ -428,7 +427,7 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 			log.Warn("error updating backend sync state", "name", be.Name, "err", err)
 			return
 		}
-		els, err = cp.fetchELState(ctx, be)
+		els, err := cp.fetchELState(ctx, be)
 		if err != nil {
 			return
 		}
@@ -661,7 +660,7 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 		)
 	} else {
 		if cp.espressoTag != "" {
-			log.Info("EL consensus cycle complete",
+			log.Info("espresso consensus cycle complete",
 				"proposedBlock", proposedBlock,
 				"espressoBlock", lowestEspressoBlock,
 				"espressoTag", cp.espressoTag,
