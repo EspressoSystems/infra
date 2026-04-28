@@ -29,9 +29,7 @@ type ConsensusTrackerState struct {
 	Safe      hexutil.Uint64 `json:"safe"`
 	Finalized hexutil.Uint64 `json:"finalized"`
 	LocalSafe hexutil.Uint64 `json:"local_safe"`
-	// Espresso holds the minimum Espresso-finalized L2 block number across healthy
-	// backends. Zero when no espresso_consensus_tag is configured or not yet known.
-	Espresso hexutil.Uint64 `json:"espresso,omitempty"`
+	Espresso  hexutil.Uint64 `json:"espresso,omitempty"`
 }
 
 func (ct *InMemoryConsensusTracker) update(o *ConsensusTrackerState) {

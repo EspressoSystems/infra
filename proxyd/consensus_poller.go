@@ -77,7 +77,7 @@ type backendState struct {
 	safeBlockNumber      hexutil.Uint64
 	localSafeBlockNumber hexutil.Uint64
 	finalizedBlockNumber hexutil.Uint64
-	espressoBlockNumber  hexutil.Uint64 // non-zero only when espressoTag is configured
+	espressoBlockNumber  hexutil.Uint64
 
 	// CL mode only: used for pin-backend selection.
 	currentL1Number uint64
@@ -401,7 +401,7 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 	}
 
 	var inSync bool
-	var latestBlockNumber, safeBlockNumber, localSafeBlockNumber, finalizedBlockNumber hexutil.Uint64
+	var latestBlockNumber, safeBlockNumber, localSafeBlockNumber, finalizedBlockNumber, espressoBlockNumber hexutil.Uint64
 	var latestBlockHash string
 	var currentL1Number uint64
 	var syncStatusRaw json.RawMessage
@@ -435,6 +435,7 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 		latestBlockNumber, latestBlockHash = els.LatestBlockNumber, els.LatestBlockHash
 		safeBlockNumber = els.SafeBlockNumber
 		finalizedBlockNumber = els.FinalizedBlockNumber
+		espressoBlockNumber = els.EspressoBlockNumber
 	}
 
 	RecordConsensusBackendUpdateDelay(be, bs.lastUpdate)
@@ -446,7 +447,7 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 		latestBlockHash:      latestBlockHash,
 		safeBlockNumber:      safeBlockNumber,
 		finalizedBlockNumber: finalizedBlockNumber,
-		espressoBlockNumber:  els.EspressoBlockNumber,
+		espressoBlockNumber:  espressoBlockNumber,
 	})
 
 	if cp.consensusLayer {
@@ -596,6 +597,12 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 			"currentConsensusBlockNumber", currentConsensusBlockNumber,
 			"proposedBlock", proposedBlock,
 			"proposedBlockHash", proposedBlockHash)
+	}
+
+	// For espresso tag enabled, we want to make sure if a Espresso proxy is restarted,
+	// That we do not move backwards
+	if currentEspresso := cp.tracker.GetState().Espresso; lowestEspressoBlock < currentEspresso {
+		lowestEspressoBlock = currentEspresso
 	}
 
 	// update tracker
@@ -947,7 +954,7 @@ type ELBlockState struct {
 	LatestBlockHash      string
 	SafeBlockNumber      hexutil.Uint64
 	FinalizedBlockNumber hexutil.Uint64
-	EspressoBlockNumber  hexutil.Uint64 // non-zero only when espressoTag is configured
+	EspressoBlockNumber  hexutil.Uint64
 }
 
 // backendStateUpdate is a value object passed to setBackendState to avoid
