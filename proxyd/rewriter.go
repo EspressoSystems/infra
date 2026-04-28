@@ -15,6 +15,8 @@ type RewriteContext struct {
 	maxBlockRange  uint64
 	consensusMode  bool
 	consensusLayer bool
+	espressoTag    string         // custom tag to rewrite (e.g. "espresso")
+	espresso       hexutil.Uint64 // consensus Espresso-finalized block number
 }
 
 type RewriteResult uint8
@@ -273,9 +275,21 @@ func remarshalBlockNumberOrHash(current interface{}) (*rpc.BlockNumberOrHash, er
 }
 
 func rewriteTag(rctx RewriteContext, current string) (string, bool, error) {
+	// Replace the configured espresso tag with the consensus Espresso-finalized block.
+	// If the consensus block is not yet known (0), pass the tag through unchanged so
+	// the downstream fullnode-proxy can still resolve it.
+	if rctx.espressoTag != "" && current == rctx.espressoTag {
+		if rctx.espresso > 0 {
+			return rctx.espresso.String(), true, nil
+		}
+		return current, false, nil
+	}
+
 	bnh, err := remarshalBlockNumberOrHash(current)
 	if err != nil {
-		return "", false, err
+		// Unknown tag — pass through unchanged so custom tags (e.g. "espresso")
+		// can be handled by the backend.
+		return current, false, nil
 	}
 
 	// this is a hash, not a block

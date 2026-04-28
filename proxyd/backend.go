@@ -1788,6 +1788,8 @@ func (bg *BackendGroup) OverwriteConsensusResponses(rpcReqs []*RPCReq, overridde
 		maxBlockRange:  bg.Consensus.maxBlockRange,
 		consensusMode:  true,
 		consensusLayer: bg.Consensus.IsConsensusLayer(),
+		espressoTag:    bg.Consensus.espressoTag,
+		espresso:       bg.Consensus.GetEspressoBlockNumber(),
 	}
 
 	for i, req := range rpcReqs {
