@@ -660,7 +660,7 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 		)
 	} else {
 		if cp.espressoTag != "" {
-			log.Info("espresso consensus cycle complete",
+			log.Debug("espresso consensus cycle complete",
 				"proposedBlock", proposedBlock,
 				"espressoBlock", lowestEspressoBlock,
 				"espressoTag", cp.espressoTag,
