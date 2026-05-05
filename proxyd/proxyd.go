@@ -618,6 +618,9 @@ func Start(config *Config) (*Server, func(), error) {
 			if bgcfg.ConsensusPollerInterval > 0 {
 				copts = append(copts, WithPollerInterval(time.Duration(bgcfg.ConsensusPollerInterval)))
 			}
+			if bgcfg.ConsensusEspressoTag != "" {
+				copts = append(copts, WithEspressoTag(bgcfg.ConsensusEspressoTag))
+			}
 			if bgcfg.ConsensusCLSyncThreshold > 0 {
 				copts = append(copts, WithCLSyncThreshold(bgcfg.ConsensusCLSyncThreshold))
 			}

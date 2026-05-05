@@ -15,6 +15,8 @@ type RewriteContext struct {
 	maxBlockRange  uint64
 	consensusMode  bool
 	consensusLayer bool
+	espressoTag    string
+	espresso       hexutil.Uint64
 }
 
 type RewriteResult uint8
@@ -273,6 +275,13 @@ func remarshalBlockNumberOrHash(current interface{}) (*rpc.BlockNumberOrHash, er
 }
 
 func rewriteTag(rctx RewriteContext, current string) (string, bool, error) {
+	if rctx.espressoTag != "" && current == rctx.espressoTag {
+		if rctx.espresso > 0 {
+			return rctx.espresso.String(), true, nil
+		}
+		return current, false, nil
+	}
+
 	bnh, err := remarshalBlockNumberOrHash(current)
 	if err != nil {
 		return "", false, err

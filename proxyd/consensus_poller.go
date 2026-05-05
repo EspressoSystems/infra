@@ -62,6 +62,11 @@ type ConsensusPoller struct {
 	syncStatusBodyMu  sync.RWMutex
 	consensusSyncBody json.RawMessage // served response body for optimism_syncStatus
 	lastServedCLL1Num uint64          // monotonicity floor for pin selection
+
+	// espressoTag, when non-empty, enables Espresso-finality consensus polling.
+	// Each backend is queried with eth_getBlockByNumber(<espressoTag>, false) every cycle;
+	// the minimum resolved block across healthy backends is stored in the tracker.
+	espressoTag string
 }
 
 type backendState struct {
@@ -72,6 +77,7 @@ type backendState struct {
 	safeBlockNumber      hexutil.Uint64
 	localSafeBlockNumber hexutil.Uint64
 	finalizedBlockNumber hexutil.Uint64
+	espressoBlockNumber  hexutil.Uint64
 
 	// CL mode only: used for pin-backend selection.
 	currentL1Number uint64
@@ -135,6 +141,12 @@ func (cp *ConsensusPoller) GetSafeBlockNumber() hexutil.Uint64 {
 // GetFinalizedBlockNumber returns the `finalized` agreed block number in a consensus
 func (cp *ConsensusPoller) GetFinalizedBlockNumber() hexutil.Uint64 {
 	return cp.tracker.GetState().Finalized
+}
+
+// GetEspressoBlockNumber returns the minimum Espresso-finalized block number in consensus.
+// Returns 0 when espressoTag is not configured or not yet resolved.
+func (cp *ConsensusPoller) GetEspressoBlockNumber() hexutil.Uint64 {
+	return cp.tracker.GetState().Espresso
 }
 
 // GetLocalSafeBlockNumber returns the `local_safe` agreed block number in a consensus (CL mode only)
@@ -307,6 +319,12 @@ func WithPollerInterval(interval time.Duration) ConsensusOpt {
 	}
 }
 
+func WithEspressoTag(tag string) ConsensusOpt {
+	return func(cp *ConsensusPoller) {
+		cp.espressoTag = tag
+	}
+}
+
 func NewConsensusPoller(bg *BackendGroup, opts ...ConsensusOpt) *ConsensusPoller {
 	ctx, cancelFunc := context.WithCancel(context.Background())
 
@@ -383,7 +401,7 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 	}
 
 	var inSync bool
-	var latestBlockNumber, safeBlockNumber, localSafeBlockNumber, finalizedBlockNumber hexutil.Uint64
+	var latestBlockNumber, safeBlockNumber, localSafeBlockNumber, finalizedBlockNumber, espressoBlockNumber hexutil.Uint64
 	var latestBlockHash string
 	var currentL1Number uint64
 	var syncStatusRaw json.RawMessage
@@ -416,6 +434,7 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 		latestBlockNumber, latestBlockHash = els.LatestBlockNumber, els.LatestBlockHash
 		safeBlockNumber = els.SafeBlockNumber
 		finalizedBlockNumber = els.FinalizedBlockNumber
+		espressoBlockNumber = els.EspressoBlockNumber
 	}
 
 	RecordConsensusBackendUpdateDelay(be, bs.lastUpdate)
@@ -427,6 +446,7 @@ func (cp *ConsensusPoller) UpdateBackend(ctx context.Context, be *Backend) {
 		latestBlockHash:      latestBlockHash,
 		safeBlockNumber:      safeBlockNumber,
 		finalizedBlockNumber: finalizedBlockNumber,
+		espressoBlockNumber:  espressoBlockNumber,
 	})
 
 	if cp.consensusLayer {
@@ -522,6 +542,7 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 	var lowestFinalizedBlock hexutil.Uint64
 	var lowestSafeBlock hexutil.Uint64
 	var lowestLocalSafeBlock hexutil.Uint64 // only populated in CL mode
+	var lowestEspressoBlock hexutil.Uint64  // only populated when espressoTag is configured
 	for _, bs := range candidates {
 		if lowestLatestBlock == 0 || bs.latestBlockNumber < lowestLatestBlock {
 			lowestLatestBlock = bs.latestBlockNumber
@@ -535,6 +556,11 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 		}
 		if cp.consensusLayer && (lowestLocalSafeBlock == 0 || bs.localSafeBlockNumber < lowestLocalSafeBlock) {
 			lowestLocalSafeBlock = bs.localSafeBlockNumber
+		}
+		if cp.espressoTag != "" && bs.espressoBlockNumber > 0 {
+			if lowestEspressoBlock == 0 || bs.espressoBlockNumber < lowestEspressoBlock {
+				lowestEspressoBlock = bs.espressoBlockNumber
+			}
 		}
 	}
 
@@ -572,12 +598,19 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 			"proposedBlockHash", proposedBlockHash)
 	}
 
+	// For espresso tag enabled, we want to make sure if a Espresso proxy is restarted,
+	// That we do not move backwards
+	if currentEspresso := cp.tracker.GetState().Espresso; lowestEspressoBlock < currentEspresso {
+		lowestEspressoBlock = currentEspresso
+	}
+
 	// update tracker
 	cp.tracker.SetState(ConsensusTrackerState{
 		Latest:    proposedBlock,
 		Safe:      lowestSafeBlock,
 		Finalized: lowestFinalizedBlock,
 		LocalSafe: lowestLocalSafeBlock,
+		Espresso:  lowestEspressoBlock,
 	})
 
 	// update consensus group
@@ -626,10 +659,19 @@ func (cp *ConsensusPoller) UpdateBackendGroupConsensus(ctx context.Context) {
 			"finalizedBlock", lowestFinalizedBlock,
 		)
 	} else {
-		log.Debug("group state",
-			"proposedBlock", proposedBlock,
-			"consensusBackends", strings.Join(consensusBackendsNames, ", "),
-			"filteredBackends", strings.Join(filteredBackendsNames, ", "))
+		if cp.espressoTag != "" {
+			log.Debug("espresso consensus cycle complete",
+				"proposedBlock", proposedBlock,
+				"espressoBlock", lowestEspressoBlock,
+				"espressoTag", cp.espressoTag,
+				"consensusBackends", strings.Join(consensusBackendsNames, ", "),
+				"filteredBackends", strings.Join(filteredBackendsNames, ", "))
+		} else {
+			log.Debug("group state",
+				"proposedBlock", proposedBlock,
+				"consensusBackends", strings.Join(consensusBackendsNames, ", "),
+				"filteredBackends", strings.Join(filteredBackendsNames, ", "))
+		}
 	}
 }
 
@@ -664,6 +706,7 @@ func (cp *ConsensusPoller) Ban(be *Backend) {
 	bs.latestBlockNumber = 0
 	bs.safeBlockNumber = 0
 	bs.finalizedBlockNumber = 0
+	bs.espressoBlockNumber = 0
 	bs.clOutputRootTimeouts = 0
 }
 
@@ -782,6 +825,15 @@ func (cp *ConsensusPoller) fetchELState(ctx context.Context, be *Backend) (ELBlo
 		return ELBlockState{}, errZeroFinalizedBlock
 	}
 
+	if cp.espressoTag != "" {
+		espressoNum, _, espressoErr := cp.fetchELBlock(ctx, be, cp.espressoTag)
+		if espressoErr != nil {
+			log.Warn("error fetching espresso block from backend (skipping)", "name", be.Name, "tag", cp.espressoTag, "err", espressoErr)
+		} else {
+			s.EspressoBlockNumber = espressoNum
+		}
+	}
+
 	return s, nil
 }
 
@@ -880,6 +932,7 @@ func (cp *ConsensusPoller) GetBackendState(be *Backend) *backendState {
 		safeBlockNumber:      bs.safeBlockNumber,
 		localSafeBlockNumber: bs.localSafeBlockNumber,
 		finalizedBlockNumber: bs.finalizedBlockNumber,
+		espressoBlockNumber:  bs.espressoBlockNumber,
 		peerCount:            bs.peerCount,
 		inSync:               bs.inSync,
 		lastUpdate:           bs.lastUpdate,
@@ -900,6 +953,7 @@ type ELBlockState struct {
 	LatestBlockHash      string
 	SafeBlockNumber      hexutil.Uint64
 	FinalizedBlockNumber hexutil.Uint64
+	EspressoBlockNumber  hexutil.Uint64
 }
 
 // backendStateUpdate is a value object passed to setBackendState to avoid
@@ -911,6 +965,7 @@ type backendStateUpdate struct {
 	latestBlockHash      string
 	safeBlockNumber      hexutil.Uint64
 	finalizedBlockNumber hexutil.Uint64
+	espressoBlockNumber  hexutil.Uint64
 }
 
 func (cp *ConsensusPoller) setBackendState(be *Backend, upd backendStateUpdate) bool {
@@ -923,6 +978,7 @@ func (cp *ConsensusPoller) setBackendState(be *Backend, upd backendStateUpdate) 
 	bs.latestBlockHash = upd.latestBlockHash
 	bs.safeBlockNumber = upd.safeBlockNumber
 	bs.finalizedBlockNumber = upd.finalizedBlockNumber
+	bs.espressoBlockNumber = upd.espressoBlockNumber
 	bs.lastUpdate = time.Now()
 	bs.backendStateMux.Unlock()
 	return changed

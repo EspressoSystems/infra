@@ -29,6 +29,7 @@ type ConsensusTrackerState struct {
 	Safe      hexutil.Uint64 `json:"safe"`
 	Finalized hexutil.Uint64 `json:"finalized"`
 	LocalSafe hexutil.Uint64 `json:"local_safe"`
+	Espresso  hexutil.Uint64 `json:"espresso,omitempty"`
 }
 
 func (ct *InMemoryConsensusTracker) update(o *ConsensusTrackerState) {
@@ -39,6 +40,7 @@ func (ct *InMemoryConsensusTracker) update(o *ConsensusTrackerState) {
 	ct.state.Safe = o.Safe
 	ct.state.Finalized = o.Finalized
 	ct.state.LocalSafe = o.LocalSafe
+	ct.state.Espresso = o.Espresso
 }
 
 // InMemoryConsensusTracker store and retrieve in memory, async-safe
